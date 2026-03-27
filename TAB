@@ -2,18 +2,27 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MÉTODO TAB - Gestão de Erros</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MÉTODO TAB PRO - Gestão de Erros</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
     <style>
-        body { background-color: #f8f9fa; color: #212529; font-family: 'Inter', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
+        :root {
+            --color-b: #f59e0b; --color-l: #3b82f6; --color-d: #ef4444;
+        }
+        body { background-color: #f8f9fa; color: #212529; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
         .font-display { font-family: 'Syne', sans-serif; }
-        .card { background: white; border: 1px solid #e9ecef; border-radius: 20px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-        .btn-primary { background-color: #212529; color: white; padding: 14px; border-radius: 14px; font-weight: 700; width: 100%; transition: all 0.2s; }
+        .card { background: white; border: 1px solid #e9ecef; border-radius: 24px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
+        .btn-primary { background-color: #212529; color: white; padding: 14px; border-radius: 16px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .btn-primary:active { transform: scale(0.96); }
-        input { background: white; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 16px; width: 100%; outline: none; transition: border 0.2s; }
-        input:focus { border-color: #3b82f6; }
+        .btn-secondary { background-color: white; border: 1px solid #e9ecef; color: #212529; padding: 14px; border-radius: 16px; font-weight: 600; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        input, textarea { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 14px; width: 100%; outline: none; transition: all 0.2s; font-size: 16px; }
+        input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1); }
+        .tab-active { color: #212529; }
+        .tab-inactive { color: #9ca3af; }
+        /* Esconder scrollbar */
+        ::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
@@ -26,134 +35,366 @@
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
         "lucide-react": "https://esm.sh/lucide-react@0.284.0",
         "framer-motion": "https://esm.sh/framer-motion@10.16.4",
-        "@google/genai": "https://esm.sh/@google/genai@1.29.0"
+        "@google/genai": "https://esm.sh/@google/genai@1.29.0",
+        "clsx": "https://esm.sh/clsx@2.0.0",
+        "tailwind-merge": "https://esm.sh/tailwind-merge@1.14.0",
+        "date-fns": "https://esm.sh/date-fns@2.30.0"
       }
     }
     </script>
 
     <script type="module">
-        import React, { useState, useEffect } from 'react';
+        import React, { useState, useEffect, useMemo } from 'react';
         import { createRoot } from 'react-dom/client';
         import * as Lucide from 'lucide-react';
         import { motion, AnimatePresence } from 'framer-motion';
         import { GoogleGenAI, Type } from '@google/genai';
+        import { format, addDays, isAfter, startOfDay } from 'date-fns';
+        import { clsx } from 'clsx';
+        import { twMerge } from 'tailwind-merge';
+
+        function cn(...inputs) { return twMerge(clsx(inputs)); }
+
+        // --- CONSTANTES DE REVISÃO ---
+        const REVIEW_INTERVALS = {
+            'B': [1, 3, 7, 15, 30],
+            'L': [1, 2, 4, 7, 14, 28],
+            'D': [1, 1, 3, 5, 10, 20]
+        };
 
         function App() {
-            const [apiKey, setApiKey] = useState(localStorage.getItem('metodo_tab_key') || '');
+            const [apiKey, setApiKey] = useState(localStorage.getItem('metodo_tab_key_pro') || '');
             const [activeTab, setActiveTab] = useState('registrar');
-            const [errors, setErrors] = useState(() => JSON.parse(localStorage.getItem('tab_erros_v3') || '[]'));
-            const [streak, setStreak] = useState(() => JSON.parse(localStorage.getItem('tab_streak_v3') || '{"count":0,"lastDate":""}'));
-            const [loading, setLoading] = useState(false);
+            const [errors, setErrors] = useState(() => JSON.parse(localStorage.getItem('tab_erros_pro') || '[]'));
+            const [streak, setStreak] = useState(() => JSON.parse(localStorage.getItem('tab_streak_pro') || '{"count":0,"lastDate":""}'));
+            const [meta, setMeta] = useState(() => Number(localStorage.getItem('tab_meta_pro')) || 5);
+            const [practiceHistory, setPracticeHistory] = useState(() => JSON.parse(localStorage.getItem('tab_practice_pro') || '[]'));
+            
+            // Estados de UI
+            const [isLoading, setIsLoading] = useState(false);
+            const [currentQuestion, setCurrentQuestion] = useState(null);
+            const [selectedAnswer, setSelectedAnswer] = useState(null);
+            const [showFeedback, setShowFeedback] = useState(false);
+            const [practiceSearch, setPracticeSearch] = useState('');
+            const [colarInput, setColarInput] = useState('');
 
-            // Salvar dados automaticamente
-            useEffect(() => localStorage.setItem('tab_erros_v3', JSON.stringify(errors)), [errors]);
-            useEffect(() => localStorage.setItem('tab_streak_v3', JSON.stringify(streak)), [streak]);
-            useEffect(() => { if(apiKey) localStorage.setItem('metodo_tab_key', apiKey); }, [apiKey]);
+            // Salvar dados
+            useEffect(() => {
+                localStorage.setItem('tab_erros_pro', JSON.stringify(errors));
+                localStorage.setItem('tab_streak_pro', JSON.stringify(streak));
+                localStorage.setItem('tab_practice_pro', JSON.stringify(practiceHistory));
+                localStorage.setItem('tab_meta_pro', meta.toString());
+                if(apiKey) localStorage.setItem('metodo_tab_key_pro', apiKey);
+            }, [errors, streak, practiceHistory, meta, apiKey]);
 
-            // --- TELA DE CONFIGURAÇÃO DA CHAVE ---
+            // --- LÓGICA DE REVISÃO ---
+            const dueErrors = useMemo(() => {
+                return errors.filter(error => {
+                    if (error.resolved) return false;
+                    const intervals = REVIEW_INTERVALS[error.tab];
+                    const revCount = error.revisoes?.length || 0;
+                    if (revCount >= intervals.length) return false;
+                    const lastAction = revCount > 0 ? error.revisoes[revCount - 1] : error.createdAt;
+                    const nextReviewDate = addDays(startOfDay(new Date(lastAction)), intervals[revCount]);
+                    return !isAfter(nextReviewDate, new Date());
+                });
+            }, [errors]);
+
+            // --- LÓGICA DE IA ---
+            const getAI = () => new GoogleGenAI(apiKey);
+
+            const handleAnalyzeColada = async () => {
+                if (!colarInput || colarInput.length < 20) return;
+                setIsLoading(true);
+                try {
+                    const model = getAI().getGenerativeModel({ model: "gemini-1.5-flash" });
+                    const prompt = `Analise esta questão e extraia: materia, enunciado, alternativas (lista A-E), gabarito (0-4), explicacao, conceito, dica. Texto: ${colarInput}`;
+                    const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+                    const q = JSON.parse(result.response.text());
+                    setCurrentQuestion(q);
+                    setActiveTab('pratica');
+                } catch (e) { alert("Erro ao analisar. Verifique sua chave."); }
+                finally { setIsLoading(false); }
+            };
+
+            const handlePracticeSearch = async () => {
+                if (!practiceSearch) return;
+                setIsLoading(true);
+                try {
+                    const model = getAI().getGenerativeModel({ model: "gemini-1.5-flash" });
+                    const prompt = `Gere uma questão difícil estilo ENEM sobre: ${practiceSearch}. Retorne JSON com: materia, enunciado, alternativas (array 5), gabarito (0-4), explicacao, conceito, dica.`;
+                    const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } });
+                    setCurrentQuestion(JSON.parse(result.response.text()));
+                    setSelectedAnswer(null);
+                    setShowFeedback(false);
+                } catch (e) { alert("Erro ao gerar questão."); }
+                finally { setIsLoading(false); }
+            };
+
+            // --- TELA DE LOGIN (KEY) ---
             if (!apiKey) {
                 return (
                     <div className="min-h-screen flex items-center justify-center p-6 bg-gray-50">
-                        <div className="card w-full max-w-sm space-y-6 text-center">
-                            <Lucide.ShieldCheck size={48} className="mx-auto text-blue-500" />
-                            <div>
-                                <h1 className="font-display text-2xl font-extrabold">Configuração Segura</h1>
-                                <p className="text-gray-500 text-sm mt-2">Cole sua chave do Google AI Studio abaixo. Ela ficará salva apenas no seu navegador.</p>
-                            </div>
-                            <input 
-                                type="password" 
-                                placeholder="Cole sua API Key aqui..." 
-                                onKeyDown={(e) => { if(e.key === 'Enter') setApiKey(e.target.value); }}
-                            />
-                            <button onClick={(e) => setApiKey(e.previousSibling.value)} className="btn-primary">Ativar Aplicativo</button>
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-xs text-blue-500 underline">Onde pegar minha chave?</a>
-                        </div>
+                        <motion.div initial={{scale:0.9, opacity:0}} animate={{scale:1, opacity:1}} className="card w-full max-w-sm space-y-6 text-center">
+                            <Lucide.ShieldCheck size={50} className="mx-auto text-blue-500" />
+                            <h1 className="font-display text-2xl font-extrabold">Método TAB Pro</h1>
+                            <p className="text-gray-500 text-sm">Sua chave é salva apenas no seu aparelho para total segurança.</p>
+                            <input type="password" placeholder="Cole sua API Key do Gemini..." onKeyDown={(e) => e.key === 'Enter' && setApiKey(e.target.value)} />
+                            <button onClick={(e) => setApiKey(e.target.previousSibling.value)} className="btn-primary">Ativar Aplicativo</button>
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" className="text-xs text-blue-500 underline">Pegar chave gratuita aqui</a>
+                        </motion.div>
                     </div>
                 );
             }
 
-            // --- LÓGICA DE IA ---
-            const generateAIQuestion = async (tema) => {
-                setLoading(true);
-                try {
-                    const genAI = new GoogleGenAI({ apiKey });
-                    const model = genAI.models.generateContent({
-                        model: "gemini-1.5-flash",
-                        contents: `Gere uma questão ENEM sobre: ${tema}. Retorne em JSON com campos: materia, enunciado, alternativas (array 5), gabarito (0-4), explicacao.`,
-                        config: { responseMimeType: "application/json" }
-                    });
-                    const result = await model;
-                    alert("Questão gerada! (Lógica de exibição simplificada nesta versão)");
-                    console.log(JSON.parse(result.text));
-                } catch (e) {
-                    alert("Erro na IA. Verifique sua chave.");
-                } finally { setLoading(false); }
-            };
-
-            const handleSave = (e) => {
-                e.preventDefault();
-                const f = e.target;
-                setErrors([{ id: Date.now(), materia: f.materia.value, questao: f.questao.value, tab: f.tab.value }, ...errors]);
-                const today = new Date().toISOString().split('T')[0];
-                if(streak.lastDate !== today) setStreak({ count: streak.count + 1, lastDate: today });
-                f.reset();
-                setActiveTab('lista');
-            };
-
             return (
-                <div className="max-w-md mx-auto min-h-screen pb-24 px-4 pt-6">
+                <div className="max-w-md mx-auto min-h-screen pb-28 px-4 pt-6">
+                    {/* Header */}
                     <header className="flex justify-between items-center mb-8">
-                        <h1 className="font-display text-2xl font-extrabold">MÉTODO <span className="text-blue-500">TAB</span></h1>
-                        <div className="flex items-center gap-2 bg-amber-100 text-amber-600 px-3 py-1.5 rounded-full">
-                            <Lucide.Flame size={16} fill="currentColor" />
-                            <span className="font-bold">{streak.count}</span>
+                        <div>
+                            <h1 className="font-display text-2xl font-extrabold tracking-tight">MÉTODO <span className="text-blue-500">TAB</span></h1>
+                            <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest">Gestão de Erros Pro</p>
+                        </div>
+                        <div className="flex items-center gap-2 bg-amber-100 text-amber-600 px-3 py-1.5 rounded-full border border-amber-200">
+                            <Lucide.Flame size={18} fill="currentColor" />
+                            <span className="text-sm font-bold">{streak.count} dias</span>
                         </div>
                     </header>
 
                     <main>
-                        {activeTab === 'registrar' ? (
-                            <form onSubmit={handleSave} className="space-y-6">
-                                <h2 className="font-display text-lg font-bold">Registrar Erro</h2>
-                                <input name="materia" placeholder="Matéria" required />
-                                <input name="questao" placeholder="Questão (ex: Q01)" required />
-                                <div className="grid grid-cols-3 gap-2">
-                                    {['B', 'L', 'D'].map(t => (
-                                        <label key={t} className="flex flex-col items-center p-3 border rounded-xl cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500">
-                                            <input type="radio" name="tab" value={t} defaultChecked={t==='B'} className="hidden" />
-                                            <span className="text-xs font-bold">{t === 'B' ? 'BANAL' : t === 'L' ? 'LACUNA' : 'DESCONH.'}</span>
-                                        </label>
-                                    ))}
-                                </div>
-                                <button type="submit" className="btn-primary">Salvar no Histórico</button>
-                            </form>
-                        ) : (
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center">
-                                    <h2 className="font-display text-lg font-bold">Meus Erros</h2>
-                                    <button onClick={() => { localStorage.removeItem('metodo_tab_key'); window.location.reload(); }} className="text-[10px] text-gray-400">Trocar Chave</button>
-                                </div>
-                                {errors.map(err => (
-                                    <div key={err.id} className="card flex justify-between items-center">
-                                        <div>
-                                            <p className="font-bold text-sm">{err.materia} - {err.questao}</p>
-                                            <span className="text-[10px] font-bold opacity-60">{err.tab}</span>
+                        <AnimatePresence mode="wait">
+                            {activeTab === 'registrar' && (
+                                <motion.div key="reg" initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-10}} className="space-y-6">
+                                    {dueErrors.length > 0 && (
+                                        <div onClick={() => setActiveTab('revisao')} className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center justify-between cursor-pointer">
+                                            <div className="flex items-center gap-3">
+                                                <Lucide.RotateCcw className="text-blue-500" />
+                                                <span className="text-sm font-bold text-blue-700">{dueErrors.length} Revisões Pendentes!</span>
+                                            </div>
+                                            <Lucide.ChevronRight size={18} className="text-blue-500" />
                                         </div>
-                                        <button onClick={() => setErrors(errors.filter(e => e.id !== err.id))} className="text-red-400"><Lucide.Trash2 size={18}/></button>
+                                    )}
+
+                                    <div className="card space-y-4">
+                                        <h2 className="font-display text-lg font-bold">Registrar Erro</h2>
+                                        <form onSubmit={(e) => {
+                                            e.preventDefault();
+                                            const f = e.target;
+                                            const newErr = {
+                                                id: Date.now().toString(),
+                                                materia: f.materia.value,
+                                                questao: f.questao.value,
+                                                tab: f.tab.value,
+                                                createdAt: Date.now(),
+                                                revisoes: [],
+                                                resolved: false
+                                            };
+                                            setErrors([newErr, ...errors]);
+                                            f.reset();
+                                            const today = new Date().toISOString().split('T')[0];
+                                            if(streak.lastDate !== today) setStreak({ count: streak.count + 1, lastDate: today });
+                                        }} className="space-y-4">
+                                            <input name="materia" placeholder="Matéria (ex: Biologia)" required />
+                                            <input name="questao" placeholder="Questão (ex: Q15)" required />
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {['B', 'L', 'D'].map(t => (
+                                                    <label key={t} className="flex flex-col items-center p-3 border rounded-xl cursor-pointer has-[:checked]:bg-gray-50 has-[:checked]:border-black">
+                                                        <input type="radio" name="tab" value={t} defaultChecked={t==='B'} className="hidden" />
+                                                        <span className={`text-[10px] font-black ${t==='B'?'text-amber-500':t==='L'?'text-blue-500':'text-red-500'}`}>
+                                                            {t==='B'?'BANAL':t==='L'?'LACUNA':'DESCONH.'}
+                                                        </span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <button type="submit" className="btn-primary w-full">Salvar Erro</button>
+                                        </form>
                                     </div>
-                                ))}
-                            </div>
-                        )}
+
+                                    <div className="card space-y-4">
+                                        <h2 className="font-display text-lg font-bold">Análise por IA</h2>
+                                        <textarea 
+                                            placeholder="Cole o texto da questão aqui para a IA analisar..." 
+                                            className="h-24 text-sm"
+                                            value={colarInput}
+                                            onChange={e => setColarInput(e.target.value)}
+                                        />
+                                        <button onClick={handleAnalyzeColada} disabled={isLoading} className="btn-secondary w-full">
+                                            {isLoading ? <Lucide.Loader2 className="animate-spin" /> : <Lucide.Zap size={18} className="text-blue-500" />}
+                                            Analisar com IA
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {activeTab === 'lista' && (
+                                <motion.div key="list" initial={{opacity:0}} animate={{opacity:1}} className="space-y-4">
+                                    <h2 className="font-display text-xl font-bold">Histórico de Erros</h2>
+                                    {errors.length === 0 ? (
+                                        <div className="text-center py-12 text-gray-400">Nenhum erro registrado ainda.</div>
+                                    ) : (
+                                        errors.map(err => (
+                                            <div key={err.id} className="card flex justify-between items-center group">
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`w-2 h-2 rounded-full ${err.tab==='B'?'bg-amber-500':err.tab==='L'?'bg-blue-500':'bg-red-500'}`}></span>
+                                                        <p className="font-bold text-sm">{err.materia}</p>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">{err.questao} • {new Date(err.createdAt).toLocaleDateString()}</p>
+                                                </div>
+                                                <button onClick={() => setErrors(errors.filter(e => e.id !== err.id))} className="text-gray-300 hover:text-red-500 transition-colors">
+                                                    <Lucide.Trash2 size={18} />
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </motion.div>
+                            )}
+
+                            {activeTab === 'revisao' && (
+                                <motion.div key="rev" initial={{opacity:0}} animate={{opacity:1}} className="space-y-6">
+                                    <h2 className="font-display text-xl font-bold">Revisões de Hoje</h2>
+                                    {dueErrors.length === 0 ? (
+                                        <div className="card text-center py-12 space-y-4">
+                                            <Lucide.CheckCircle2 size={48} className="mx-auto text-green-500" />
+                                            <p className="font-bold">Tudo em dia!</p>
+                                            <p className="text-sm text-gray-500">Você não tem erros para revisar agora.</p>
+                                        </div>
+                                    ) : (
+                                        dueErrors.map(err => (
+                                            <div key={err.id} className="card space-y-4 border-l-4 border-l-blue-500">
+                                                <div className="flex justify-between items-start">
+                                                    <div>
+                                                        <p className="text-[10px] font-black text-blue-500 uppercase">{err.tab === 'B' ? 'Banal' : err.tab === 'L' ? 'Lacuna' : 'Desconhecimento'}</p>
+                                                        <h3 className="font-bold text-lg">{err.materia}</h3>
+                                                        <p className="text-sm text-gray-500">{err.questao}</p>
+                                                    </div>
+                                                    <span className="bg-gray-100 text-[10px] px-2 py-1 rounded-md font-bold">Rev. #{err.revisoes?.length || 0}</span>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button 
+                                                        onClick={() => {
+                                                            setErrors(errors.map(e => e.id === err.id ? {...e, revisoes: [...(e.revisoes||[]), Date.now()]} : e));
+                                                        }}
+                                                        className="btn-primary flex-1 py-2 text-sm"
+                                                    >Feito</button>
+                                                    <button 
+                                                        onClick={() => setErrors(errors.map(e => e.id === err.id ? {...e, resolved: true} : e))}
+                                                        className="btn-secondary flex-1 py-2 text-sm"
+                                                    >Dominado</button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </motion.div>
+                            )}
+
+                            {activeTab === 'pratica' && (
+                                <motion.div key="prac" initial={{opacity:0}} animate={{opacity:1}} className="space-y-6">
+                                    <div className="card space-y-4">
+                                        <h2 className="font-display text-lg font-bold">Simulado com IA</h2>
+                                        <div className="flex gap-2">
+                                            <input 
+                                                placeholder="Tema (ex: Fotossíntese)" 
+                                                value={practiceSearch}
+                                                onChange={e => setPracticeSearch(e.target.value)}
+                                            />
+                                            <button onClick={handlePracticeSearch} disabled={isLoading} className="bg-black text-white p-4 rounded-2xl">
+                                                {isLoading ? <Lucide.Loader2 className="animate-spin" /> : <Lucide.Search size={20} />}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {currentQuestion && (
+                                        <div className="card space-y-6">
+                                            <div className="space-y-2">
+                                                <span className="bg-blue-100 text-blue-600 text-[10px] font-black px-2 py-1 rounded-md uppercase">{currentQuestion.materia}</span>
+                                                <p className="text-sm leading-relaxed font-medium">{currentQuestion.enunciado}</p>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {currentQuestion.alternativas.map((alt, idx) => (
+                                                    <button 
+                                                        key={idx}
+                                                        onClick={() => {
+                                                            if(selectedAnswer !== null) return;
+                                                            setSelectedAnswer(idx);
+                                                            setShowFeedback(true);
+                                                            setPracticeHistory([{id: Date.now(), materia: currentQuestion.materia, acertou: idx === currentQuestion.gabarito, timestamp: Date.now()}, ...practiceHistory]);
+                                                        }}
+                                                        className={cn(
+                                                            "w-full text-left p-4 rounded-xl border text-sm transition-all",
+                                                            selectedAnswer === idx ? (idx === currentQuestion.gabarito ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700") : "bg-white border-gray-100 hover:border-gray-300"
+                                                        )}
+                                                    >
+                                                        <span className="font-bold mr-2">{String.fromCharCode(65 + idx)})</span> {alt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {showFeedback && (
+                                                <motion.div initial={{opacity:0, height:0}} animate={{opacity:1, height:'auto'}} className="p-4 bg-gray-50 rounded-2xl space-y-2">
+                                                    <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Explicação</p>
+                                                    <p className="text-sm text-gray-600">{currentQuestion.explicacao}</p>
+                                                    <div className="pt-2 border-t border-gray-200 mt-2">
+                                                        <p className="text-[10px] font-bold text-blue-500">DICA: {currentQuestion.dica}</p>
+                                                    </div>
+                                                </motion.div>
+                                            )}
+                                        </div>
+                                    )}
+                                </motion.div>
+                            )}
+
+                            {activeTab === 'config' && (
+                                <motion.div key="conf" initial={{opacity:0}} animate={{opacity:1}} className="space-y-6">
+                                    <h2 className="font-display text-xl font-bold">Configurações</h2>
+                                    <div className="card space-y-6">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-gray-400 uppercase">Meta Diária de Erros</label>
+                                            <div className="flex items-center gap-4">
+                                                <input type="range" min="1" max="20" value={meta} onChange={e => setMeta(Number(e.target.value))} className="accent-black" />
+                                                <span className="font-bold text-lg">{meta}</span>
+                                            </div>
+                                        </div>
+                                        <div className="pt-4 border-t space-y-2">
+                                            <button onClick={() => { localStorage.removeItem('metodo_tab_key_pro'); window.location.reload(); }} className="btn-secondary w-full text-sm">Trocar Chave da IA</button>
+                                            <button onClick={() => { if(confirm('Apagar todos os dados?')) { localStorage.clear(); window.location.reload(); } }} className="btn-secondary w-full text-sm text-red-500 border-red-100">Resetar Aplicativo</button>
+                                        </div>
+                                    </div>
+                                    <div className="text-center text-[10px] text-gray-300 uppercase font-bold tracking-[0.2em]">Método TAB v3.0 Pro</div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </main>
 
-                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-3 flex justify-around">
-                        <button onClick={() => setActiveTab('registrar')} className={activeTab === 'registrar' ? 'text-blue-500' : 'text-gray-400'}><Lucide.Plus /></button>
-                        <button onClick={() => setActiveTab('lista')} className={activeTab === 'lista' ? 'text-blue-500' : 'text-gray-400'}><Lucide.ListTodo /></button>
+                    {/* Navigation */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-lg border-t border-gray-100 px-6 py-3 flex justify-between items-center z-50">
+                        {[
+                            { id: 'registrar', icon: Lucide.Plus, label: 'Add' },
+                            { id: 'revisao', icon: Lucide.RotateCcw, label: 'Rev', badge: dueErrors.length },
+                            { id: 'lista', icon: Lucide.ListTodo, label: 'Erros' },
+                            { id: 'pratica', icon: Lucide.Target, label: 'Prática' },
+                            { id: 'config', icon: Lucide.Settings, label: 'Mais' }
+                        ].map(item => (
+                            <button 
+                                key={item.id} 
+                                onClick={() => setActiveTab(item.id)}
+                                className={cn("relative flex flex-col items-center gap-1 transition-all", activeTab === item.id ? "text-black scale-110" : "text-gray-400")}
+                            >
+                                <item.icon size={20} strokeWidth={activeTab === item.id ? 2.5 : 2} />
+                                <span className="text-[9px] font-bold uppercase">{item.label}</span>
+                                {item.badge > 0 && (
+                                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                                        {item.badge}
+                                    </span>
+                                )}
+                            </button>
+                        ))}
                     </nav>
                 </div>
             );
         }
 
-        createRoot(document.getElementById('root')).render(<App />);
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
