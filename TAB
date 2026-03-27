@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MÉTODO TAB - Gestão de Erros</title>
+    <!-- Tailwind CSS para o visual -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fontes -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-b: #f59e0b; --color-l: #3b82f6; --color-d: #ef4444;
+        }
+        body { background-color: #f8f9fa; color: #212529; font-family: 'Inter', sans-serif; }
+        .font-display { font-family: 'Syne', sans-serif; }
+        .btn-primary { background-color: #212529; color: white; padding: 12px; border-radius: 12px; font-weight: 600; transition: all 0.2s; }
+        .btn-primary:active { transform: scale(0.95); }
+        .card { background: white; border: 1px solid #e9ecef; border-radius: 16px; padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- Importação de Bibliotecas via CDN -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.284.0",
+        "framer-motion": "https://esm.sh/framer-motion@10.16.4",
+        "@google/genai": "https://esm.sh/@google/genai@1.29.0"
+      }
+    }
+    </script>
+
+    <script type="module">
+        import React, { useState, useEffect, useMemo } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import * as Lucide from 'lucide-react';
+        import { motion, AnimatePresence } from 'framer-motion';
+        import { GoogleGenAI, Type } from '@google/genai';
+
+        // --- CONFIGURAÇÃO DA IA ---
+        // IMPORTANTE: Substitua 'SUA_CHAVE_AQUI' pela sua chave do Google AI Studio se o app não gerar questões.
+        const API_KEY = "GEMINI_API_KEY_PLACEHOLDER"; 
+        const genAI = new GoogleGenAI(API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('registrar');
+            const [errors, setErrors] = useState(() => {
+                const saved = localStorage.getItem('tab_erros_v2');
+                return saved ? JSON.parse(saved) : [];
+            });
+            const [streak, setStreak] = useState(() => {
+                const saved = localStorage.getItem('tab_streak_v2');
+                return saved ? JSON.parse(saved) : { count: 0, lastDate: '' };
+            });
+
+            useEffect(() => {
+                localStorage.setItem('tab_erros_v2', JSON.stringify(errors));
+            }, [errors]);
+
+            useEffect(() => {
+                localStorage.setItem('tab_streak_v2', JSON.stringify(streak));
+            }, [streak]);
+
+            const handleSaveError = (e) => {
+                e.preventDefault();
+                const form = e.target;
+                const newError = {
+                    id: Date.now().toString(),
+                    materia: form.materia.value,
+                    questao: form.questao.value,
+                    tab: form.tab.value,
+                    createdAt: Date.now(),
+                    resolved: false
+                };
+                setErrors([newError, ...errors]);
+                form.reset();
+                
+                // Streak logic
+                const today = new Date().toISOString().split('T')[0];
+                if (streak.lastDate !== today) {
+                    setStreak({ count: streak.count + 1, lastDate: today });
+                }
+            };
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen pb-24 px-4 pt-6">
+                    <header className="flex justify-between items-center mb-8">
+                        <div>
+                            <h1 className="font-display text-2xl font-extrabold tracking-tight">
+                                MÉTODO <span className="text-blue-500">TAB</span>
+                            </h1>
+                            <p className="text-gray-500 text-xs font-medium">Gestão de Erros Inteligente</p>
+                        </div>
+                        <div className="flex items-center gap-2 bg-amber-100 text-amber-600 px-3 py-1.5 rounded-full border border-amber-200">
+                            <Lucide.Flame size={16} fill="currentColor" />
+                            <span className="text-sm font-bold">{streak.count} dias</span>
+                        </div>
+                    </header>
+
+                    <main>
+                        {activeTab === 'registrar' && (
+                            <form onSubmit={handleSaveError} className="space-y-6">
+                                <h2 className="font-display text-lg font-bold flex items-center gap-2">
+                                    <Lucide.Plus size={20} className="text-blue-500" /> Registrar Erro
+                                </h2>
+                                <div className="space-y-4">
+                                    <input name="materia" placeholder="Matéria (ex: Biologia)" required className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500" />
+                                    <input name="questao" placeholder="Questão (ex: Q15)" required className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500" />
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <label className="flex flex-col items-center p-3 border rounded-xl cursor-pointer has-[:checked]:bg-amber-50 has-[:checked]:border-amber-500">
+                                            <input type="radio" name="tab" value="B" defaultChecked className="hidden" />
+                                            <span className="text-xs font-bold text-amber-600">BANAL</span>
+                                        </label>
+                                        <label className="flex flex-col items-center p-3 border rounded-xl cursor-pointer has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500">
+                                            <input type="radio" name="tab" value="L" className="hidden" />
+                                            <span className="text-xs font-bold text-blue-600">LACUNA</span>
+                                        </label>
+                                        <label className="flex flex-col items-center p-3 border rounded-xl cursor-pointer has-[:checked]:bg-red-50 has-[:checked]:border-red-500">
+                                            <input type="radio" name="tab" value="D" className="hidden" />
+                                            <span className="text-xs font-bold text-red-600">DESCONH.</span>
+                                        </label>
+                                    </div>
+                                    <button type="submit" className="w-full btn-primary">Salvar Erro</button>
+                                </div>
+                            </form>
+                        )}
+
+                        {activeTab === 'lista' && (
+                            <div className="space-y-4">
+                                <h2 className="font-display text-lg font-bold">Seus Erros ({errors.length})</h2>
+                                {errors.map(err => (
+                                    <div key={err.id} className="card flex justify-between items-center">
+                                        <div>
+                                            <p className="font-bold text-sm">{err.materia} - {err.questao}</p>
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${err.tab === 'B' ? 'bg-amber-100 text-amber-600' : err.tab === 'L' ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
+                                                {err.tab === 'B' ? 'BANAL' : err.tab === 'L' ? 'LACUNA' : 'DESCONHECIMENTO'}
+                                            </span>
+                                        </div>
+                                        <button onClick={() => setErrors(errors.filter(e => e.id !== err.id))} className="text-gray-400 hover:text-red-500">
+                                            <Lucide.Trash2 size={18} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-4 py-2 flex justify-around items-center">
+                        <button onClick={() => setActiveTab('registrar')} className={`flex flex-col items-center p-2 ${activeTab === 'registrar' ? 'text-black' : 'text-gray-400'}`}>
+                            <Lucide.Plus size={20} />
+                            <span className="text-[10px] font-bold">ADD</span>
+                        </button>
+                        <button onClick={() => setActiveTab('lista')} className={`flex flex-col items-center p-2 ${activeTab === 'lista' ? 'text-black' : 'text-gray-400'}`}>
+                            <Lucide.ListTodo size={20} />
+                            <span className="text-[10px] font-bold">LISTA</span>
+                        </button>
+                    </nav>
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
